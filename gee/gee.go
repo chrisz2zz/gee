@@ -3,6 +3,7 @@ package gee
 import (
 	"log"
 	"net/http"
+	"strings"
 )
 
 type HandlerFunc func(*Context)
@@ -16,12 +17,20 @@ type Engine struct {
 func New() *Engine {
 	engine := &Engine{router: newRouter()}
 	engine.RouterGroup = &RouterGroup{engine: engine}
-	engine.groups = make([]*RouterGroup, 0)
+	engine.groups = []*RouterGroup{engine.RouterGroup}
 	return engine
 }
 
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	middlewares := make([]HandlerFunc, 0, 3)
+	for _, group := range engine.groups {
+		if strings.HasPrefix(r.URL.Path, group.prefix) {
+			middlewares = append(middlewares, group.middlewares...)
+		}
+	}
+
 	c := newContext(w, r)
+	c.handlers = middlewares
 	engine.router.handle(c)
 }
 
@@ -36,12 +45,16 @@ type RouterGroup struct {
 	engine      *Engine
 }
 
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+	group.middlewares = append(group.middlewares, middlewares...)
+}
+
 func (group *RouterGroup) Group(prefix string) *RouterGroup {
 	engine := group.engine
 	newGroup := &RouterGroup{
-		prefix:      prefix,
-		middlewares: make([]HandlerFunc, 0),
-		engine:      engine,
+		prefix: group.prefix + prefix,
+		parent: group,
+		engine: engine,
 	}
 
 	engine.groups = append(engine.groups, newGroup)
